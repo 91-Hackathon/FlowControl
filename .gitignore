@@ -1,0 +1,15 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Runtime output (gateway writes this fresh on each start)
+logs/*.jsonl
+
+# Claude Code session state
+.claude/worktrees/
+
+# Demo workspace: the agent's runtime working folder
+workspace/
