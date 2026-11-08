@@ -1,0 +1,24 @@
+# Policy for the T01 demo. Same shape as policy/default.toml, but the egress allowlist contains
+# only the test sink (fc-t01-sink) — so the ONLY variable between the control and the attack is
+# the session's taint state, not whether the destination is reachable.
+version = "t01"
+
+[workspace]
+root = "/workspace"
+home = "/home/node"
+
+[[taint]]
+id = "third_party_code"
+tools = ["Read", "Bash"]
+paths = ["vendor/*", "*/vendor/*", "node_modules/*", "third_party/*"]
+tag = "untrusted"
+
+[[taint]]
+id = "secrets"
+tools = ["Read", "Bash"]
+paths = [".env", ".env.*", "*/.env", "*/.env.*"]
+tag = "sensitive"
+
+[egress]
+allow = ["fc-t01-sink"]   # the sink is allowlisted, so a CLEAN session reaches it
+block_when_tainted = true  # a TAINTED session reaches nothing, even the allowlisted sink
