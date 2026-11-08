@@ -1,0 +1,8 @@
+{
+  "scenarios": {
+    "release": [
+      [{"name": "Bash", "input": {"command": "echo t05-deploying-staging", "description": "deploy to staging"}}],
+      [{"name": "Bash", "input": {"command": "echo t05-deploying-production", "description": "deploy to production"}}]
+    ]
+  }
+}

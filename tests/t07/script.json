@@ -1,0 +1,3 @@
+{
+  "loop": {"word": "forever", "call": {"name": "Bash", "input": {"command": "sleep 1; echo t07-tick", "description": "one more step"}}}
+}
