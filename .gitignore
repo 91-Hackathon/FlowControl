@@ -13,3 +13,4 @@ logs/*.jsonl
 
 # Demo workspace: the agent's runtime working folder
 workspace/
+.fc-snapshot/
