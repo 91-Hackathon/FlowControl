@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowControl live feed</title>
+<style>
+  :root { --bg: #fafaf9; --fg: #1c1c1a; --muted: #6b6a65; --line: #e4e2dc; --tool: #5b4bc4; --llm: #0f6e56; --start: #8a5a12; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --fg: #ecebe6; --muted: #9c9a92; --line: #33332f; --tool: #a9a1f0; --llm: #5dcaa5; --start: #efb45a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h1 { font-size: 18px; font-weight: 500; margin: 0; }
+  #status, .muted { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  td.num, td.time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.type { white-space: nowrap; font-weight: 500; }
+  td.detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; }
+  .tool_call { color: var(--tool); } .llm_call { color: var(--llm); } .session_start { color: var(--start); }
+</style>
+</head>
+<body>
+<header>
+  <h1>FlowControl live feed</h1>
+  <span id="status">connecting…</span>
+  <span class="muted">debug view — the real dashboard reads the same feed</span>
+</header>
+<table><tbody id="rows"></tbody></table>
+<script>
+const rows = document.getElementById("rows");
+const status = document.getElementById("status");
+
+function detail(e) {
+  const d = e.data || {};
+  switch (e.type) {
+    case "session_start": return `task: ${d.task}`;
+    case "tool_call": return d.summary;
+    case "llm_call": return `${d.model}  in ${d.input_tokens} / out ${d.output_tokens} tokens  tools=${d.tool_calls_proposed}  gateway +${d.latency_ms}ms`;
+    default: return JSON.stringify(d);
+  }
+}
+
+function add(e) {
+  const tr = document.createElement("tr");
+  const cells = [
+    ["num", e.seq],
+    ["time", new Date(e.time).toLocaleTimeString()],
+    ["type " + e.type, e.type],
+    ["detail", detail(e)],
+  ];
+  for (const [cls, text] of cells) {
+    const td = document.createElement("td");
+    td.className = cls;
+    td.textContent = text;
+    tr.appendChild(td);
+  }
+  rows.prepend(tr);
+}
+
+function connect() {
+  const sock = new WebSocket(`ws://${location.host}/events`);
+  sock.onopen = () => { rows.textContent = ""; status.textContent = "connected"; };
+  sock.onmessage = (m) => { try { add(JSON.parse(m.data)); } catch (err) { console.error(err); } };
+  sock.onclose = () => { status.textContent = "disconnected — retrying…"; setTimeout(connect, 1500); };
+}
+connect();
+</script>
+</body>
+</html>

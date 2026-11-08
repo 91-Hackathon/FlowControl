@@ -1,0 +1,749 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/gateway/events.schema.json",
+  "title": "Gateway <-> Dashboard protocol",
+  "description": "Messages sent over the WebSocket between the gateway and the dashboard. Gateway -> dashboard messages are events; dashboard -> gateway messages are commands. Rule: fields may be added, never renamed or removed.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/event"
+    },
+    {
+      "$ref": "#/$defs/command"
+    }
+  ],
+  "$defs": {
+    "level": {
+      "description": "Risk level. null for purely informational events.",
+      "enum": [
+        "green",
+        "yellow",
+        "red",
+        null
+      ]
+    },
+    "session_state": {
+      "description": "Session state AFTER this event. Only escalates within a session, except 'healed' which follows a successful heal.",
+      "enum": [
+        "clean",
+        "sensitive",
+        "untrusted",
+        "tainted",
+        "blocked",
+        "healed",
+        "ended"
+      ]
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^evt_[0-9]{4,}$"
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "session_id",
+        "seq",
+        "time",
+        "type",
+        "level",
+        "session_state",
+        "caused_by",
+        "data"
+      ],
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/event_id"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^sess_[A-Za-z0-9]+$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonically increasing per session. Sort by this, not by arrival order."
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 UTC, e.g. 2026-11-04T10:32:05.123Z"
+        },
+        "type": {
+          "enum": [
+            "session_start",
+            "llm_call",
+            "tool_call",
+            "network_request",
+            "taint",
+            "decision",
+            "approval_request",
+            "approval_result",
+            "heal",
+            "session_end",
+            "stats",
+            "quarantine",
+            "settings"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/level"
+        },
+        "session_state": {
+          "$ref": "#/$defs/session_state"
+        },
+        "caused_by": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event_id"
+          },
+          "description": "Earlier events that led to this one. Used to draw the attack chain. Empty array if none."
+        },
+        "data": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "session_start"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_session_start"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "llm_call"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_llm_call"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "tool_call"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_tool_call"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "network_request"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_network_request"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "taint"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_taint"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "decision"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_decision"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "approval_request"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_approval_request"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "approval_result"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_approval_result"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "heal"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_heal"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "session_end"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_session_end"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "stats"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_stats"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "quarantine"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/data_quarantine"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "data_session_start": {
+      "type": "object",
+      "required": [
+        "agent",
+        "task"
+      ],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "e.g. claude-code, codex"
+        },
+        "task": {
+          "type": "string",
+          "description": "What the user asked the agent to do. Used by intent check."
+        },
+        "user": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string",
+          "description": "Name of the policy file in effect"
+        }
+      }
+    },
+    "data_llm_call": {
+      "type": "object",
+      "required": [
+        "provider",
+        "destination",
+        "latency_ms"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "e.g. anthropic, openai"
+        },
+        "destination": {
+          "type": "string",
+          "description": "e.g. api.anthropic.com"
+        },
+        "model": {
+          "type": "string"
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls_proposed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many tool calls the model asked for in this response"
+        },
+        "canary_hit": {
+          "type": "boolean",
+          "description": "A canary secret appeared in the request body. Informational only for LLM calls: after an approved .env read the canary is expected to be in the conversation. Red is only for canaries going to non-LLM destinations."
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Extra latency added by the gateway, not total LLM time"
+        }
+      }
+    },
+    "data_tool_call": {
+      "type": "object",
+      "required": [
+        "tool",
+        "summary",
+        "target"
+      ],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "description": "e.g. Read, Write, Edit, Bash, WebFetch, or an MCP tool name"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short human-readable description for the dashboard row"
+        },
+        "input": {
+          "type": "string",
+          "description": "Truncated (~200 chars) and redacted"
+        },
+        "target": {
+          "enum": [
+            "local",
+            "network"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "File path, if the tool touches a file"
+        },
+        "blocked": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "data_network_request": {
+      "type": "object",
+      "required": [
+        "method",
+        "destination",
+        "dest_category",
+        "blocked"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "HTTP method, or CONNECT for opaque TLS"
+        },
+        "destination": {
+          "type": "string",
+          "description": "Host name"
+        },
+        "dest_category": {
+          "enum": [
+            "llm",
+            "allowlist",
+            "unknown"
+          ]
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "preview": {
+          "type": "string",
+          "description": "First ~200 chars of the body. Real secrets replaced with ***; canary values shown as [CANARY]"
+        },
+        "canary_hit": {
+          "type": "boolean",
+          "default": false
+        },
+        "blocked": {
+          "type": "boolean"
+        },
+        "latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "null when blocked"
+        }
+      }
+    },
+    "data_taint": {
+      "type": "object",
+      "required": [
+        "tag",
+        "source",
+        "from_state",
+        "to_state"
+      ],
+      "properties": {
+        "tag": {
+          "enum": [
+            "sensitive",
+            "untrusted"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "description": "File path or URL that caused the taint"
+        },
+        "from_state": {
+          "$ref": "#/$defs/session_state"
+        },
+        "to_state": {
+          "$ref": "#/$defs/session_state"
+        }
+      }
+    },
+    "data_decision": {
+      "type": "object",
+      "required": [
+        "target_event",
+        "verdict",
+        "rule",
+        "reason",
+        "decided_by"
+      ],
+      "properties": {
+        "target_event": {
+          "$ref": "#/$defs/event_id"
+        },
+        "verdict": {
+          "enum": [
+            "allow",
+            "ask",
+            "block"
+          ]
+        },
+        "rule": {
+          "type": "string",
+          "description": "Rule id from the policy file, e.g. lethal_trifecta, canary_hit, unknown_domain"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Human-readable explanation shown on the dashboard"
+        },
+        "decided_by": {
+          "enum": [
+            "rule",
+            "llm"
+          ],
+          "description": "LLM may only escalate (allow -> ask); red is always rule"
+        }
+      }
+    },
+    "data_approval_request": {
+      "type": "object",
+      "required": [
+        "target_event",
+        "summary",
+        "reason",
+        "timeout_s"
+      ],
+      "properties": {
+        "target_event": {
+          "$ref": "#/$defs/event_id"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Auto-deny after this many seconds"
+        }
+      }
+    },
+    "data_approval_result": {
+      "type": "object",
+      "required": [
+        "target_event",
+        "result",
+        "by"
+      ],
+      "properties": {
+        "target_event": {
+          "$ref": "#/$defs/event_id"
+        },
+        "result": {
+          "enum": [
+            "approved",
+            "denied",
+            "timeout"
+          ]
+        },
+        "by": {
+          "type": "string",
+          "description": "Who decided, e.g. user@phone, user@dashboard, system"
+        }
+      }
+    },
+    "data_heal": {
+      "type": "object",
+      "required": [
+        "quarantined_source",
+        "rolled_back_to",
+        "removed_events",
+        "message_to_agent",
+        "status"
+      ],
+      "properties": {
+        "quarantined_source": {
+          "type": "string"
+        },
+        "rolled_back_to": {
+          "$ref": "#/$defs/event_id",
+          "description": "Last clean event the context was rewound to"
+        },
+        "removed_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event_id"
+          },
+          "description": "Events whose content was replaced/quarantined in the agent context"
+        },
+        "message_to_agent": {
+          "type": "string",
+          "description": "Text inserted in place of the poisoned content"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "failed"
+          ]
+        }
+      }
+    },
+    "data_session_end": {
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "enum": [
+            "completed",
+            "stopped",
+            "failed"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "attacks_blocked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heals": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "data_stats": {
+      "type": "object",
+      "required": [
+        "total_events",
+        "auto_allowed",
+        "asked",
+        "blocked",
+        "avg_latency_ms"
+      ],
+      "properties": {
+        "total_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "auto_allowed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "asked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "avg_latency_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "command": {
+      "description": "Dashboard -> gateway",
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "approve",
+            "deny",
+            "stop",
+            "rollback_files",
+            "set_protection",
+            "add_rule",
+            "remove_rule"
+          ]
+        },
+        "target_event": {
+          "$ref": "#/$defs/event_id"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "enum": [
+                  "approve",
+                  "deny"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "target_event"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "command": {
+                "enum": [
+                  "stop",
+                  "rollback_files"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "session_id"
+            ]
+          }
+        }
+      ]
+    },
+    "data_quarantine": {
+      "type": "object",
+      "required": [
+        "source",
+        "placeholder"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "The quarantined file or URL"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "The neutral text put in the tool result instead"
+        }
+      }
+    }
+  }
+}

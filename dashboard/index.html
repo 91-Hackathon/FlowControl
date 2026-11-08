@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlowControl · Network</title>
+<!-- bump ?v= after editing a file so browsers don't use a cached copy -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="style.css?v=12">
+</head>
+<body>
+<header class="top">
+  <div class="brand">FlowControl</div>
+  <div class="head-main">
+    <div class="taskline" id="session">Waiting for an agent session…</div>
+    <div class="statusline" id="statusLine"></div>
+  </div>
+  <span id="conn" class="conn">Connecting</span>
+  <button id="openSettings" class="btn btn-outline set-btn" type="button" aria-haspopup="dialog" aria-expanded="false" title="Protections and disallowed actions">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5.5 2v4.2c0 3.2-2.3 5.6-5.5 6.8-3.2-1.2-5.5-3.6-5.5-6.8V3.5z"/></svg>Protections<span class="set-count" id="ruleCount" hidden></span>
+  </button>
+  <button id="stopRun" class="btn btn-outline btn-stop" type="button" disabled title="Revoke the run: the gateway denies every further request">Stop run</button>
+  <button id="replayDemo" class="btn btn-outline" type="button" hidden>Replay demo</button>
+  <button id="present" class="btn btn-solid" type="button" title="Presenter mode (P)">Present</button>
+</header>
+
+<div class="settings-pop" id="settingsPop" role="dialog" aria-label="Protections" hidden></div>
+
+<div class="layout">
+<div class="app">
+
+  <nav class="panels" id="panels" role="tablist" aria-label="Views">
+    <button type="button" role="tab" data-view="network" class="on">Network</button>
+    <button type="button" role="tab" data-view="map">Map</button>
+    <button type="button" role="tab" data-view="security">Security <span class="count" id="secCount" hidden></span></button>
+    <button type="button" role="tab" data-view="replay">Replay</button>
+    <span class="grow"></span>
+    <span class="net-only">
+      <input id="filter" type="search" placeholder="Filter" aria-label="Filter requests" autocomplete="off">
+      <span class="chips" id="types" role="group" aria-label="Request types">
+        <button type="button" data-type="all" class="on">All</button>
+        <button type="button" data-type="llm">LLM</button>
+        <button type="button" data-type="tool">Tool</button>
+        <button type="button" data-type="net">Network</button>
+        <button type="button" data-type="gateway">Gateway</button>
+        <button type="button" data-type="blocked">Blocked</button>
+      </span>
+    </span>
+    <button id="rec" class="icon rec on" type="button" title="Pause recording" aria-label="Pause recording"><span></span></button>
+    <button id="clear" class="icon" type="button" title="Clear" aria-label="Clear">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M4.2 11.8l7.6-7.6"/></svg>
+    </button>
+  </nav>
+
+  <div class="kpis" id="kpis" aria-label="Key numbers"></div>
+
+  <!-- Network: DevTools request list -->
+  <div class="view main" id="view-network">
+    <div class="table-wrap" id="tableWrap">
+      <table id="grid">
+        <colgroup>
+          <col class="c-name"><col class="c-status"><col class="c-type"><col class="c-init"><col class="c-size"><col class="c-time"><col class="c-wf">
+        </colgroup>
+        <thead>
+          <tr><th>Name</th><th>Status</th><th>Type</th><th>Initiator</th><th>Size</th><th>Time</th><th>Waterfall</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty">
+        <p>Recording agent activity…</p>
+        <p class="hint">Start Claude Code through the gateway to see its requests here.</p>
+      </div>
+    </div>
+    <aside class="detail" id="detail" hidden>
+      <div class="tabs">
+        <button type="button" id="closeDetail" class="icon close" title="Close" aria-label="Close">×</button>
+        <button type="button" data-tab="overview" class="on">Overview</button>
+        <button type="button" data-tab="security" id="secTab" hidden>Security</button>
+        <button type="button" data-tab="data">Data</button>
+        <button type="button" data-tab="event">Event</button>
+      </div>
+      <div class="detail-body" id="detailBody"></div>
+    </aside>
+  </div>
+
+  <!-- Map: Little Snitch style -->
+  <div class="view map-view" id="view-map" hidden>
+    <div class="map-graph"><svg role="img" aria-label="Traffic map: agent, gateway and where requests go"></svg>
+      <div class="legend"><span><i class="lg ok"></i>went through</span><span><i class="lg denied"></i>stopped at the gateway</span><span><i class="lg-dot"></i>traffic right now</span><span class="hint">Thicker line = more requests</span></div>
+    </div>
+    <div class="map-list">
+      <table>
+        <colgroup><col style="width:28px"><col><col style="width:96px"><col style="width:64px"><col style="width:58px"><col style="width:70px"></colgroup>
+        <thead><tr><th></th><th>Destination</th><th>Kind</th><th>Requests</th><th>Denied</th><th>Last</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="hint pad">Click a destination to see its requests in Network.</p>
+    </div>
+  </div>
+
+  <!-- Security: Cloudflare security events style -->
+  <div class="view sec-view" id="view-security" hidden>
+    <div class="sec-top">
+      <div class="sec-summary">
+        <div><span class="lbl">Judged</span><b class="sec-total">0</b></div>
+        <div><span class="lbl">Allowed</span><b class="sec-allow st-ok">0</b></div>
+        <div><span class="lbl">Challenged</span><b class="sec-ask st-warn">0</b></div>
+        <div><span class="lbl">Blocked</span><b class="sec-block st-bad">0</b></div>
+      </div>
+      <div class="sec-chart-wrap">
+        <div class="lbl">Events by action over the session <span class="lg-inline"><i class="lg ok"></i>allowed <i class="lg denied"></i>blocked</span></div>
+        <svg class="sec-chart" viewBox="0 0 100 48" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="sec-tops">
+        <table class="sec-rules"><thead><tr><th>Top rules</th><th class="num">Events</th></tr></thead><tbody></tbody></table>
+        <table class="sec-tools"><thead><tr><th>Top blocked</th><th class="num">Events</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="sec-log-head"><span></span><span>Time</span><span>Action</span><span>Rule</span><span>Request</span></div>
+    <div class="sec-log"></div>
+    <p class="sec-empty hint pad">No gateway decisions yet. Blocks and challenges show up here with their rule and reason.</p>
+  </div>
+
+  <!-- Replay: LangSmith trace style -->
+  <div class="view replay-view" id="view-replay" hidden>
+    <div class="playback">
+      <button type="button" class="icon pb-start" title="Back to start" aria-label="Back to start">⏮</button>
+      <button type="button" class="icon pb-play" title="Play" aria-label="Play">▶</button>
+      <button type="button" class="icon pb-end" title="Jump to live" aria-label="Jump to live">⏭</button>
+      <input type="range" class="pb-slider" min="0" max="0" value="0" step="1" aria-label="Replay position">
+      <span class="pb-pos"></span>
+      <select class="pb-speed" aria-label="Replay speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+    </div>
+    <div class="chain-strip" hidden></div>
+    <div class="trace">
+      <div class="trace-tree"></div>
+      <div class="trace-detail"></div>
+    </div>
+  </div>
+
+  <div class="statusbar" id="status"></div>
+</div>
+
+<aside class="story" id="storyPane" aria-label="What happened">
+  <div class="story-head">
+    <div class="eyebrow">What happened</div>
+    <h1 class="story-title" id="storyTitle">Waiting for an agent</h1>
+    <p class="story-sub" id="storySub"></p>
+  </div>
+  <div class="approvals" id="approvals" aria-live="polite"></div>
+  <ol class="moments" id="moments"></ol>
+  <p class="story-hint" id="storyHint">Click a moment to highlight its traffic.</p>
+</aside>
+</div>
+
+<script src="demo-data.js?v=2"></script>
+<script src="model.js?v=1"></script>
+<script src="rows.js?v=3"></script>
+<script src="detail.js?v=5"></script>
+<script src="kpis.js?v=3"></script>
+<script src="map.js?v=3"></script>
+<script src="security.js?v=1"></script>
+<script src="trace.js?v=2"></script>
+<script src="story.js?v=4"></script>
+<script src="settings.js?v=3"></script>
+<script src="app.js?v=12"></script>
+</body>
+</html>
