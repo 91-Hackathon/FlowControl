@@ -1,0 +1,125 @@
+# FlowControl DEMO policy: same as default.toml, plus a human-approval ("ask") rule on
+# reading secrets, to show the human-in-the-loop step. Point at it with FC_POLICY_FILE.
+#
+# FlowControl policy: which tool calls the gateway blocks before the agent receives them.
+#
+# This file lives outside the runner. compose.yaml mounts it into the gateway container
+# only, read-only: the agent can't see or change it. The gateway reads it when it starts;
+# after editing, restart the gateway (./flowcontrol stop, then ./flowcontrol run).
+#
+# How a rule matches a tool call:
+#   tools     tool names (Claude Code's: Bash, Read, Write, Edit, NotebookEdit, WebFetch, ...)
+#   paths     glob patterns for the file the tool touches. Relative patterns are inside the
+#             workspace; patterns starting with / are absolute. "*" also matches "/".
+#             Paths are compared after resolving "..", and ignoring case (a macOS workspace
+#             is case-insensitive: .CLAUDE/ and .claude/ are the same folder).
+#   commands  regular expressions searched for in a Bash command. Shell text can be written
+#             in endless ways, so these rules are ADVISORY: a match blocks, a miss proves
+#             nothing. Stronger controls (network policy, read-only mounts) come in later steps.
+#   A rule matches when the tool is listed and every condition the rule has matches.
+#   The first matching rule decides. No rule matches: the call is allowed.
+
+version = "2026-11-07.3-demo"
+
+[workspace]
+root = "/workspace"   # the agent's working folder inside the runner
+home = "/home/node"   # the agent's home folder inside the runner (what "~" means)
+
+# --- egress: where the runner may go through the gateway proxy. The runner has no other route
+# out (internal network, proven by T00); its HTTP_PROXY / HTTPS_PROXY point at the gateway, which
+# decides each destination here. The model API is separate (the credential-broker route) and is
+# not governed by this list.
+[egress]
+# Hosts a CLEAN session may reach. Everything else is denied. Exact host, or "*.suffix" (which
+# also matches the apex). Keep this short and real: a long allowlist is a long list of ways out.
+allow = [
+  "registry.npmjs.org",                                  # npm
+  "pypi.org", "files.pythonhosted.org",                  # pip
+  "github.com", "*.github.com", "codeload.github.com",   # git over https
+  "objects.githubusercontent.com",                       # github release assets
+  "downloads.claude.ai",                                 # Claude Code's own version/download host
+]
+# A session that has read untrusted content AND holds sensitive data is in the lethal trifecta:
+# any outbound request could carry the secret out, even to an allowed host (it may host an
+# attacker's account). So deny all egress from a tainted session. An unknown host is denied
+# whatever the session state, so a missed taint mark never by itself opens a door.
+block_when_tainted = true
+
+[[rules]]
+id = "protected_config"
+tools = ["Write", "Edit", "MultiEdit", "NotebookEdit"]
+paths = [
+  ".claude/*", ".mcp.json", "CLAUDE.md", "*/CLAUDE.md",   # agent settings, MCP servers, instructions
+  ".git/hooks/*", ".git/config",                           # code that runs on every git command
+  ".github/workflows/*",                                   # CI
+  "/home/node/.claude/*", "/home/node/.claude.json",       # the agent's own user settings
+]
+verdict = "block"
+reason = "Agent settings and instructions, git hooks and CI workflows are protected: the agent can't change them from inside the run."
+
+[[rules]]
+id = "shell_upload"
+tools = ["Bash"]
+commands = ['''\b(curl|wget)\b.*\s(-d|--data[a-z-]*|-F|--form|-T|--upload-file|--post-data|--post-file)(\s|=|$)''']
+verdict = "block"
+reason = "Sending data out with curl or wget."
+
+# A rule can also pause for a human: verdict = "ask" holds the tool call and shows an Approve /
+# Deny card on the dashboard (the approval is bound to the exact action; no answer in
+# FC_APPROVAL_TIMEOUT seconds denies it). Off by default — gating every secret read is a
+# usability cost (measure it, threat model T11). policy/demo.toml turns this on to show the
+# human-in-the-loop step. Uncomment to require approval before reading a secrets file:
+[[rules]]
+id = "read_secrets"
+tools = ["Read", "Bash"]   # Bash matches a command that MENTIONS the file (cat/grep .env); advisory
+paths = [".env", ".env.*", "*/.env", "*/.env.*", "*.pem", "*/*.pem", "*/id_rsa", "*/id_ed25519"]
+verdict = "ask"
+reason = "Reading a secrets file needs a human's approval."
+
+# --- taint: reading these marks the session (untrusted / sensitive). Nothing is blocked here;
+# the marks are what a later egress decision reads (lethal trifecta: untrusted + sensitive +
+# an outbound send). Source-based — the tag is from WHERE the content comes from, not from
+# scanning it, so it never fires on content.
+#   paths     for Read / WebFetch: the file the tool reads, matched like a rule's `paths`.
+#             for Bash: matched against the paths the command MENTIONS (`cat vendor/x/README.md`).
+#             That is shell text, so those marks are advisory. Here a false positive only makes
+#             later egress stricter, and a miss is covered by egress denying unknown hosts anyway.
+#   commands  regular expressions searched in a Bash command (advisory, like rules).
+#   A rule with `tools` only marks every call of those tools.
+
+[[taint]]
+id = "third_party_code"
+tools = ["Read", "Bash"]
+paths = [
+  "vendor/*", "*/vendor/*",
+  "node_modules/*", "*/node_modules/*",
+  "third_party/*", "*/third_party/*",
+]
+tag = "untrusted"
+
+[[taint]]
+id = "web_content"
+tools = ["WebFetch", "WebSearch"]
+tag = "untrusted"
+
+[[taint]]
+id = "mcp_result"
+tools = ["mcp__*"]   # any MCP tool result is third-party data (a `prefix*` match)
+tag = "untrusted"
+
+[[taint]]
+id = "secrets"
+tools = ["Read", "Bash"]
+paths = [
+  ".env", ".env.*", "*/.env", "*/.env.*",
+  "*.pem", "*/*.pem", "*.key", "*/*.key",
+  "*/id_rsa", "*/id_ed25519",
+  "secrets/*", "*/secrets/*", "*/credentials", "*/credentials.json",
+]
+tag = "sensitive"
+
+[[taint]]
+id = "shell_fetch"
+tools = ["Bash"]
+commands = ['''\b(curl|wget)\b''']   # what comes back from the network is web content
+tag = "untrusted"

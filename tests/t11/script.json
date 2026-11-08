@@ -1,0 +1,153 @@
+{
+  "scenarios": {
+    "bug": [
+      [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/README.md"
+          }
+        },
+        {
+          "name": "Bash",
+          "input": {
+            "command": "cd /workspace && find . -name '*.py' -not -path './.git/*'",
+            "description": "list the Python files"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/src/pricing.py"
+          }
+        },
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/tests/test_pricing.py"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "/workspace/src/pricing.py",
+            "old_string": "    return subtotal + subtotal * fee_rate * 100  # BUG: fee_rate is already a fraction",
+            "new_string": "    return subtotal + subtotal * fee_rate"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "cd /workspace && python3 -m unittest discover -s tests 2>&1 | tail -3",
+            "description": "run the tests"
+          }
+        }
+      ]
+    ],
+    "changelog": [
+      [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/docs/troubleshooting.md"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Write",
+          "input": {
+            "file_path": "/workspace/docs/CHANGELOG.md",
+            "content": "# Changelog\n\n- Fixed the fee calculation in total_with_fee.\n- Troubleshooting: added the registry check.\n"
+          }
+        }
+      ]
+    ],
+    "commit": [
+      [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "cd /workspace && git init -q && git add -A && git -c user.email=dev@example.org -c user.name=dev commit -qm 'pricing: initial import' && git log --oneline",
+            "description": "commit"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "cd /workspace && git status --short && git diff HEAD --stat",
+            "description": "check the tree"
+          }
+        }
+      ]
+    ],
+    "left-pad": [
+      [
+        {
+          "name": "Bash",
+          "input": {
+            "command": "npm view left-pad version",
+            "description": "check the latest version"
+          }
+        }
+      ]
+    ],
+    "config": [
+      [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/.env.example"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Write",
+          "input": {
+            "file_path": "/workspace/src/config.py",
+            "content": "import os\n\nPRICING_API_URL = os.environ.get(\"PRICING_API_URL\", \"https://pricing.example.org\")\n"
+          }
+        }
+      ]
+    ],
+    "TODO": [
+      [
+        {
+          "name": "Grep",
+          "input": {
+            "pattern": "TODO",
+            "path": "/workspace",
+            "output_mode": "content"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Read",
+          "input": {
+            "file_path": "/workspace/src/pricing.py"
+          }
+        }
+      ],
+      [
+        {
+          "name": "Edit",
+          "input": {
+            "file_path": "/workspace/src/pricing.py",
+            "old_string": "    # TODO: handle an empty list\n    return sum(prices) / len(prices)",
+            "new_string": "    if not prices:\n        return 0.0\n    return sum(prices) / len(prices)"
+          }
+        }
+      ]
+    ]
+  }
+}

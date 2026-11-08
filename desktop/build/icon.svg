@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- FlowControl app icon: traffic flows into a gate; two lines pass, one is stopped in red. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbf9f5"/>
+      <stop offset="1" stop-color="#eee9e1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="185.5" fill="none" stroke="#d9d3ca" stroke-width="2"/>
+
+  <g stroke-linecap="round" fill="none">
+    <!-- in -->
+    <path d="M262 512 H480" stroke="#111" stroke-width="34"/>
+    <!-- out: allowed -->
+    <path d="M544 372 H742" stroke="#3b3834" stroke-width="26"/>
+    <path d="M544 512 H742" stroke="#3b3834" stroke-width="26"/>
+    <!-- out: stopped -->
+    <path d="M544 652 H590" stroke="#c63f26" stroke-width="26"/>
+    <path d="M680 652 H742" stroke="#c63f26" stroke-width="14" stroke-dasharray="1 30" opacity=".55"/>
+  </g>
+  <!-- source -->
+  <circle cx="250" cy="512" r="46" fill="#fff" stroke="#111" stroke-width="20"/>
+  <!-- the gate -->
+  <rect x="480" y="268" width="64" height="488" rx="32" fill="#111"/>
+  <!-- destinations -->
+  <circle cx="760" cy="372" r="30" fill="#3b3834"/>
+  <circle cx="760" cy="512" r="30" fill="#3b3834"/>
+  <!-- stop marker -->
+  <circle cx="626" cy="652" r="40" fill="#c63f26"/>
+  <path d="M610 636 L642 668 M642 636 L610 668" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+</svg>

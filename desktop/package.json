@@ -1,0 +1,87 @@
+{
+  "name": "flowcontrol-desktop",
+  "productName": "FlowControl",
+  "version": "0.1.0",
+  "description": "FlowControl dashboard as a desktop app",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "postinstall": "node scripts/dev-name.js",
+    "prestart": "node scripts/dev-name.js",
+    "predemo": "node scripts/dev-name.js",
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "dev.flowcontrol.desktop",
+    "productName": "FlowControl",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dashboard",
+        "to": "dashboard",
+        "filter": [
+          "**/*",
+          "!README.md"
+        ]
+      },
+      {
+        "from": "node_modules/@fontsource/inter/files",
+        "to": "fonts/inter",
+        "filter": [
+          "inter-latin-*-normal.woff2"
+        ]
+      },
+      {
+        "from": "node_modules/@fontsource/ibm-plex-mono/files",
+        "to": "fonts/plex",
+        "filter": [
+          "ibm-plex-mono-latin-*-normal.woff2"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png"
+    },
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/inter": "^5.3.0"
+  }
+}
