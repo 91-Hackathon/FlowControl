@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# FlowControl launcher: one command to start the gateway and an isolated Claude Code.
+#
+#   ./flowcontrol run                  start everything, open Claude Code in the runner
+#   ./flowcontrol run -p "say hi"      same, but pass arguments to claude (non-interactive)
+#   ./flowcontrol stop                 stop the gateway and remove the containers
+#   ./flowcontrol logs                 follow the gateway's log
+#   ./flowcontrol status               what's running
+#   ./flowcontrol rollback             restore the workspace to the snapshot taken before the last run
+#
+# Settings (environment):
+#   ANTHROPIC_API_KEY   the real key; only the gateway container gets it (required for run)
+#   FC_WORKSPACE        folder the agent works on (default: ./workspace)
+#   FC_LIVE_HOST_PORT   host port for the dashboard feed (default: 8080)
+#   FC_OPEN_DASHBOARD   open the dashboard in your browser on an interactive run (default: 1)
+#
+# Inside the runner, config the agent must not rewrite (.claude/, CI workflows, git hooks)
+# is mounted read-only: the OS refuses every write to it, whatever tool or shell trick is
+# used. See PROTECTED_DIRS / PROTECTED_FILES below; docs/threat-model.md category 3.
+set -euo pipefail
+cd "$(dirname "$0")"
+REPO="$PWD"   # the FlowControl project itself; the agent's workspace must be elsewhere
+
+GATEWAY_CONTAINER=flowcontrol-gateway-1
+LIVE_PORT="${FC_LIVE_HOST_PORT:-8080}"
+SNAPSHOT_DIR="${FC_SNAPSHOT_DIR:-$REPO/.fc-snapshot}"   # a mirror of the workspace, kept outside it (the runner can't reach it)
+
+# Paths under the workspace the agent is not allowed to change, enforced by the OS (read-only
+# mounts), not just by a gateway rule. Directories are created empty if absent, so the rule
+# holds even for files that don't exist yet. Single files are protected only if already present
+# (so the launcher never fabricates a CLAUDE.md or .mcp.json in your workspace). .git paths
+# apply only when the workspace is a git repo.
+PROTECTED_DIRS=(.claude .github/workflows)
+PROTECTED_FILES=(.mcp.json CLAUDE.md)
+
+die() { printf 'flowcontrol: %s\n' "$*" >&2; exit 1; }
+say() { printf '\033[2m[flowcontrol]\033[0m %s\n' "$*"; }
+
+# compose.yaml requires FC_SESSION_TOKEN; commands that don't start anything still need a value.
+compose() { FC_SESSION_TOKEN="${FC_SESSION_TOKEN:-not-used}" docker compose "$@"; }
+
+gateway_running() { [ -n "$(docker ps -q --filter "name=^${GATEWAY_CONTAINER}$")" ]; }
+
+# Wait up to ~8s for the gateway log to contain a line matching $1. The health check can return
+# a moment before a startup line is flushed to the log, so poll instead of grepping once.
+wait_for_gateway_log() {
+  local i
+  for i in $(seq 1 40); do
+    docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -qE "$1" && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+# Fill RO_MOUNTS with "-v host:container:ro" flags for the protected paths, seeding any
+# missing directories. Also refuses a workspace that would expose this project to the agent.
+build_protected_mounts() {
+  RO_MOUNTS=()
+  case "$REPO/" in
+    "$FC_WORKSPACE"/*) die "FC_WORKSPACE ($FC_WORKSPACE) contains the FlowControl project.
+  The agent could then rewrite the policy and the gateway. Point it at a separate folder." ;;
+  esac
+  local p
+  for p in "${PROTECTED_DIRS[@]}"; do
+    mkdir -p "$FC_WORKSPACE/$p"
+    RO_MOUNTS+=(-v "$FC_WORKSPACE/$p:/workspace/$p:ro")
+  done
+  for p in "${PROTECTED_FILES[@]}"; do
+    [ -e "$FC_WORKSPACE/$p" ] && RO_MOUNTS+=(-v "$FC_WORKSPACE/$p:/workspace/$p:ro")
+  done
+  if [ -d "$FC_WORKSPACE/.git" ]; then
+    mkdir -p "$FC_WORKSPACE/.git/hooks"
+    RO_MOUNTS+=(-v "$FC_WORKSPACE/.git/hooks:/workspace/.git/hooks:ro")
+    [ -e "$FC_WORKSPACE/.git/config" ] && RO_MOUNTS+=(-v "$FC_WORKSPACE/.git/config:/workspace/.git/config:ro")
+  fi
+}
+
+preflight() {
+  docker info >/dev/null 2>&1 || die "Docker isn't running. Open Docker Desktop and try again."
+
+  [ -n "${ANTHROPIC_API_KEY:-}" ] || die "ANTHROPIC_API_KEY isn't set in this shell.
+  It's the real key; only the gateway container will get it. If it's in ~/.zshrc, run this
+  from a normal terminal window (non-interactive shells don't read ~/.zshrc)."
+
+  # The dashboard feed port must be free, unless it's our own gateway holding it.
+  if ! gateway_running && lsof -nP -iTCP:"$LIVE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "port $LIVE_PORT is already in use (maybe a 'python3 -m gateway' still running?).
+  Stop it, or pick another port: FC_LIVE_HOST_PORT=8090 ./flowcontrol run"
+  fi
+}
+
+# Mirror the workspace to the snapshot (recovery baseline). rsync --delete, so no rm needed.
+snapshot_workspace() {
+  mkdir -p "$SNAPSHOT_DIR"
+  rsync -a --delete "$FC_WORKSPACE/" "$SNAPSHOT_DIR/" 2>/dev/null \
+    && say "workspace snapshot saved (./flowcontrol rollback restores it)" \
+    || say "could not snapshot the workspace (rsync missing?); rollback won't be available"
+}
+
+cmd_rollback() {
+  [ -d "$SNAPSHOT_DIR" ] || die "no snapshot found. One is taken at the start of each ./flowcontrol run."
+  local ws="${FC_WORKSPACE:-./workspace}"
+  [ -d "$ws" ] || die "workspace $ws doesn't exist"
+  export FC_WORKSPACE; FC_WORKSPACE="$(cd "$ws" && pwd)"
+  say "restoring $FC_WORKSPACE from the snapshot (undoing the agent's file changes)…"
+  # --checksum: compare by content, not mtime/size, so a same-size edit is still restored.
+  rsync -a --checksum --delete "$SNAPSHOT_DIR/" "$FC_WORKSPACE/" || die "rollback failed"
+  say "done. The workspace matches the snapshot taken before the last run."
+}
+
+cmd_run() {
+  preflight
+
+  local ws="${FC_WORKSPACE:-./workspace}"
+  mkdir -p "$ws"
+  export FC_WORKSPACE; FC_WORKSPACE="$(cd "$ws" && pwd)"
+  build_protected_mounts   # fills RO_MOUNTS; refuses a workspace that contains this project
+  snapshot_workspace       # recovery baseline, taken before the agent can touch anything
+
+  # A fresh session token every run: the runner gets it instead of a real key, and the gateway
+  # only accepts this one (gateway/credentials.py). Never written to disk.
+  export FC_SESSION_TOKEN; FC_SESSION_TOKEN="$(openssl rand -hex 16)"
+
+  say "starting gateway…"
+  compose up -d --wait --build gateway >/dev/null 2>&1 || {
+    compose up -d --wait --build gateway   # run again visibly so the error shows
+    die "gateway didn't start"
+  }
+  wait_for_gateway_log "real API key configured|NO real API key" \
+    || die "the gateway didn't report its credential status in time (see: ./flowcontrol logs)"
+  if docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -q "NO real API key"; then
+    die "the gateway started without a real API key: ANTHROPIC_API_KEY wasn't passed through to it.
+  Make sure it's exported in this shell (export ANTHROPIC_API_KEY), then try again. See: ./flowcontrol logs"
+  fi
+  if docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -q "^policy: UNAVAILABLE"; then
+    docker logs "$GATEWAY_CONTAINER" 2>&1 | grep "^policy:" >&2
+    die "the policy file didn't load (policy/default.toml); every tool call would be blocked"
+  fi
+  compose build -q runner >/dev/null 2>&1 || compose build runner || die "runner image didn't build"
+
+  say "$(docker logs "$GATEWAY_CONTAINER" 2>&1 | grep "^policy:" | tail -1)"
+  say "gateway ready · dashboard feed ws://localhost:${LIVE_PORT}/events · debug page http://localhost:${LIVE_PORT}/"
+  say "workspace: $FC_WORKSPACE"
+  say "read-only in the runner: ${PROTECTED_DIRS[*]} ${PROTECTED_FILES[*]} (+ .git/hooks, .git/config if a repo)"
+  say "starting Claude Code in the isolated runner (its only way out is the gateway)"
+
+  # Open the dashboard for an interactive run (best-effort; skip for -p / non-tty). Prefer the
+  # Electron desktop app in ./desktop; fall back to the browser if it isn't set up.
+  if [ -t 0 ] && [ "${1:-}" != "-p" ] && [ "${1:-}" != "--print" ] && [ "${FC_OPEN_DASHBOARD:-1}" = "1" ]; then
+    local dash_url="http://localhost:${LIVE_PORT}/dashboard/"
+    if [ -x "$REPO/desktop/node_modules/.bin/electron" ]; then
+      ( cd "$REPO/desktop" && FC_WS="ws://localhost:${LIVE_PORT}/events" npm start >/dev/null 2>&1 & )
+      say "opening the FlowControl desktop app (live feed ws://localhost:${LIVE_PORT}/events)"
+    elif command -v open >/dev/null 2>&1; then
+      open "$dash_url" >/dev/null 2>&1 || true; say "opened the dashboard: $dash_url"
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$dash_url" >/dev/null 2>&1 || true; say "opened the dashboard: $dash_url"
+    else
+      say "dashboard: $dash_url"
+    fi
+  fi
+
+  # FlowControl IS the control plane: the gateway judges every call and the sandbox contains the
+  # runner, so the agent runs without Claude Code's own permission prompts/classifier getting in
+  # the way (otherwise two layers fight — e.g. an approval the gateway grants is still blocked
+  # locally). Set FC_AGENT_SKIP_PERMISSIONS=0 to keep Claude Code's own gating on.
+  local claude_flags=()
+  [ "${FC_AGENT_SKIP_PERMISSIONS:-1}" = "1" ] && claude_flags+=(--dangerously-skip-permissions)
+
+  local status=0
+  if [ "$#" -gt 0 ] && [ ! -t 0 ] || [ "${1:-}" = "-p" ] || [ "${1:-}" = "--print" ]; then
+    compose run --rm --no-deps "${RO_MOUNTS[@]}" -T runner claude ${claude_flags[@]+"${claude_flags[@]}"} "$@" < /dev/null || status=$?
+  else
+    compose run --rm --no-deps "${RO_MOUNTS[@]}" runner claude ${claude_flags[@]+"${claude_flags[@]}"} "$@" || status=$?
+  fi
+
+  say "Claude Code exited. The gateway is still running (./flowcontrol stop to stop it)."
+  return "$status"
+}
+
+cmd_stop() {
+  compose down
+}
+
+cmd_logs() {
+  gateway_running || die "the gateway isn't running"
+  docker logs -f "$GATEWAY_CONTAINER"
+}
+
+cmd_status() {
+  docker ps -a --filter "name=^flowcontrol-" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+  if gateway_running; then
+    docker logs "$GATEWAY_CONTAINER" 2>&1 | grep -E "^(credentials|policy):" | tail -2
+  fi
+}
+
+# Only dispatch when run directly, so tests can source this file and call its functions.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  case "${1:-}" in
+    run)      shift; cmd_run "$@" ;;
+    stop)     cmd_stop ;;
+    logs)     cmd_logs ;;
+    status)   cmd_status ;;
+    rollback) cmd_rollback ;;
+    *)        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  esac
+fi

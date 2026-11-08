@@ -1,0 +1,98 @@
+# FlowControl: the agent runs in "runner", and its only way out is "gateway".
+#
+#   ┌──────────── agent-net (internal: no route outside) ────────────┐
+#   │   runner (Claude Code, /workspace)  ───►  gateway :8787 ──────┼──► egress ──► api.anthropic.com
+#   └────────────────────────────────────────────────────────────────┘
+#                                                 gateway :8080 ──► 127.0.0.1:8080 on the host (dashboard)
+#
+# docs/threat-model.md, category 0. Whether this really leaves no other way out
+# (DNS, IPv6, direct IPs, gateway down) is what test T00 checks (M2 step 5).
+
+name: flowcontrol
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: flowcontrol-gateway
+    networks: [agent-net, egress]
+    environment:
+      # Read from your shell when compose starts; never written to a file (threat model 2, 5).
+      FC_SESSION_TOKEN: ${FC_SESSION_TOKEN:?set FC_SESSION_TOKEN (the launcher generates one)}
+      FC_UPSTREAM_API_KEY: ${ANTHROPIC_API_KEY:-}   # the real key; only the gateway gets it
+      FC_UPSTREAM: ${FC_UPSTREAM:-api.anthropic.com}        # the model API (a test harness can point this at a fake)
+      FC_UPSTREAM_SCHEME: ${FC_UPSTREAM_SCHEME:-https}
+      FC_POLICY_FILE: ${FC_POLICY_FILE:-policy/default.toml}
+      FC_MAX_MODEL_REQUESTS: ${FC_MAX_MODEL_REQUESTS:-400}   # budget: auto-stop after this many model calls
+      FC_SESSION_TTL: ${FC_SESSION_TTL:-3600}                # the per-run token expires after this many seconds
+      FC_APPROVAL_TIMEOUT: ${FC_APPROVAL_TIMEOUT:-120}       # an unanswered approval is denied after this long
+      FC_CANARIES: ${FC_CANARIES:-}                          # extra canary markers to watch for in request bodies
+      # The dashboard feed also takes commands: refuse it to the agent's network (category 7).
+      FC_LIVE_DENY_NETS: ${FC_AGENT_SUBNET:-172.29.231.0/24}
+    ports:
+      - "127.0.0.1:${FC_LIVE_HOST_PORT:-8080}:8080"   # live feed + debug page, for the dashboard on this machine only
+    volumes:
+      - ./logs:/app/logs          # events.jsonl lands on the host; the runner can't see or touch it
+      - ./policy:/app/policy:ro   # the rules tool calls are judged against; the runner can't see or touch them
+      - ./dashboard:/app/dashboard:ro   # served at http://localhost:8080/dashboard/ (same origin as the feed)
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:                  # "ready" = the proxy port accepts connections
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8787), 1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+  runner:
+    build: runner
+    image: flowcontrol-runner
+    depends_on:
+      gateway:
+        condition: service_healthy   # don't start the agent before its only way out is ready
+    networks: [agent-net]          # internal only: the gateway is the only thing it can reach
+    environment:
+      ANTHROPIC_BASE_URL: http://gateway:8787
+      ANTHROPIC_API_KEY: ${FC_SESSION_TOKEN:?set FC_SESSION_TOKEN (the launcher generates one)}   # a session token, not a real key
+      # If the gateway is down, give up after a few tries instead of retrying for minutes
+      # (T00 measured 120s+ of silent retries with the default).
+      CLAUDE_CODE_MAX_RETRIES: "3"
+      # Don't run package install scripts: a postinstall hook is arbitrary code from a dependency
+      # (threat model category 4). npm and common tools honor these.
+      npm_config_ignore_scripts: "true"
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"
+      PIP_NO_INPUT: "1"
+      # Other egress (npm, pip, git, curl) goes through the gateway's forward proxy, which allows
+      # or denies each destination by policy (gateway/proxy.py). The runner has no other route out.
+      # The model route (gateway:8787) and the proxy itself must NOT be proxied: NO_PROXY excludes them.
+      HTTP_PROXY: http://gateway:8888
+      HTTPS_PROXY: http://gateway:8888
+      http_proxy: http://gateway:8888
+      https_proxy: http://gateway:8888
+      NO_PROXY: gateway,localhost,127.0.0.1,::1
+      no_proxy: gateway,localhost,127.0.0.1,::1
+    volumes:
+      - ${FC_WORKSPACE:-./workspace}:/workspace   # the only host folder the agent can write
+    user: "1000:1000"
+    read_only: true                # system files, including Claude Code's install and /etc, can't be changed
+    tmpfs:
+      - /tmp:size=512m
+      - /home/node:uid=1000,gid=1000,size=512m   # Claude Code's own state; wiped when the container stops; capped (category 6)
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256                # runaway processes (threat model category 6)
+    mem_limit: 2g
+    cpus: 2
+    stdin_open: true
+    tty: true
+
+networks:
+  agent-net:
+    internal: true                 # no gateway to the outside world for this network
+    ipam:
+      config:
+        - subnet: ${FC_AGENT_SUBNET:-172.29.231.0/24}   # fixed, so the gateway knows which addresses are the agent's
+  egress: {}

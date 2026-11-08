@@ -1,0 +1,12 @@
+# Only gateway/ is copied into the gateway image; keep everything else out of the build context.
+**/__pycache__
+.claude
+dashboard
+docs
+logs
+protocol
+runner
+tests
+workspace
+*.md
+.fc-snapshot/
